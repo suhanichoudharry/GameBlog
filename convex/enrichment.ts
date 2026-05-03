@@ -1,7 +1,7 @@
 "use node";
 
 import { v } from "convex/values";
-import { action, internalAction } from "./_generated/server";
+import { action } from "./_generated/server";
 import { internal } from "./_generated/api";
 import OpenAI from "openai";
 import { zodResponseFormat } from "openai/helpers/zod";
@@ -19,14 +19,15 @@ const EnrichmentSchema = z.object({
   industries: z.array(z.string()),
 });
 
-const openai = new OpenAI({
-  apiKey: "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"
-});
-
 // Enrich a batch of unenriched articles
 export const enrichPendingArticles = action({
   args: { batchSize: v.optional(v.number()) },
   handler: async (ctx, args): Promise<{ enriched: number; failed: number }> => {
+    // 1. Initialize inside the handler to ensure process.env is available
+    const openai = new OpenAI({
+      apiKey: process.env.OpenAI_API_KEY,
+    });
+
     const limit = args.batchSize ?? 5;
     const articles = await ctx.runQuery(internal.articles.getUnenrichedArticles, { limit });
 
@@ -36,8 +37,10 @@ export const enrichPendingArticles = action({
     for (const article of articles) {
       try {
         const content = `Title: ${article.originalTitle}\n\nContent: ${article.originalContent ?? ""}`;
+        
         const response = await openai.chat.completions.parse({
-          model: "openai/gpt-5-mini",
+          // 2. Changed "gpt-5-mini" to a valid model like "gpt-4o-mini"
+          model: "gpt-4o-mini", 
           messages: [
             {
               role: "system",
