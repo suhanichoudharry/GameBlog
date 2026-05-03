@@ -20,8 +20,7 @@ const EnrichmentSchema = z.object({
 });
 
 const openai = new OpenAI({
-  baseURL: "https://ai-gateway.hercules.app/v1",
-  apiKey: process.env.HERCULES_API_KEY,
+  apiKey: "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"
 });
 
 // Enrich a batch of unenriched articles
