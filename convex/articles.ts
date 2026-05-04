@@ -2,12 +2,14 @@ import { internalMutation, internalQuery, query, mutation } from "./_generated/s
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import { ConvexError } from "convex/values";
-import type { Id } from "./_generated/dataModel.d.ts";
 
 export const getByUrl = internalQuery({
   args: { url: v.string() },
   handler: async (ctx, args) => {
-    return await ctx.db.query("articles").filter(q => q.eq(q.field("originalUrl"), args.url)).first();
+    return await ctx.db
+      .query("articles")
+      .filter((q) => q.eq(q.field("originalUrl"), args.url))
+      .first();
   },
 });
 
@@ -43,16 +45,32 @@ export const listArticles = query({
     enrichedOnly: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    let q = ctx.db.query("articles").withIndex("by_publishedAt").order("desc");
-    const result = await q.paginate(args.paginationOpts);
-    let page = result.page;
+    let q;
+
     if (args.category) {
-      page = page.filter(a => a.sourceCategory === args.category);
+      // Use the compound index: Filter by category, then sort by publishedAt
+      q = ctx.db
+        .query("articles")
+        .withIndex("by_category_publishedAt", (q) => q.eq("sourceCategory", args.category!))
+        .order("desc");
+    } else {
+      // "All" tab: Sort everything by date
+      q = ctx.db
+        .query("articles")
+        .withIndex("by_publishedAt")
+        .order("desc");
     }
+
+    const result = await q.paginate(args.paginationOpts);
+
     if (args.enrichedOnly) {
-      page = page.filter(a => a.enriched);
+      return {
+        ...result,
+        page: result.page.filter((a) => a.enriched),
+      };
     }
-    return { ...result, page };
+
+    return result;
   },
 });
 
@@ -115,7 +133,6 @@ export const searchArticles = query({
     query: v.string(),
     paginationOpts: paginationOptsValidator,
     category: v.optional(v.union(v.literal("government"), v.literal("research"), v.literal("news"))),
-    // Tag filters — each is a single tag value to match against the array field
     cve: v.optional(v.string()),
     malware: v.optional(v.string()),
     threatActor: v.optional(v.string()),
@@ -138,7 +155,6 @@ export const searchArticles = query({
         .paginate(args.paginationOpts);
     }
 
-    // Apply post-pagination tag filters
     let page = baseResult.page;
     if (args.category) page = page.filter(a => a.sourceCategory === args.category);
     if (args.cve) page = page.filter(a => (a.cves ?? []).some(t => t.toLowerCase().includes(args.cve!.toLowerCase())));
@@ -160,7 +176,7 @@ export const getTagSuggestions = query({
       .withIndex("by_enriched", q => q.eq("enriched", true))
       .take(500);
 
-    const collect = (getter: (a: typeof articles[number]) => string[] | undefined) => {
+    const collect = (getter: (a: any) => string[] | undefined) => {
       const set = new Set<string>();
       for (const a of articles) { for (const t of getter(a) ?? []) set.add(t); }
       return [...set].sort();

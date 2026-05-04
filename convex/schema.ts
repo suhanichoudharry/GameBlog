@@ -6,28 +6,20 @@ export default defineSchema({
     tokenIdentifier: v.string(),
     name: v.optional(v.string()),
     email: v.optional(v.string()),
-    role: v.optional(v.string()), // "admin" | "user"
+    role: v.optional(v.string()),
   }).index("by_token", ["tokenIdentifier"]),
 
-  // Raw ingested articles from RSS/web sources
   articles: defineTable({
-    // Source metadata
     sourceId: v.id("sources"),
     sourceName: v.string(),
     sourceCategory: v.union(v.literal("government"), v.literal("research"), v.literal("news")),
     originalUrl: v.string(),
     originalTitle: v.string(),
     originalContent: v.optional(v.string()),
-    publishedAt: v.string(), // ISO 8601
-
-    // AI enrichment status
+    publishedAt: v.string(), 
     enriched: v.boolean(),
-
-    // AI-generated fields
     aiTitle: v.optional(v.string()),
     aiSummary: v.optional(v.string()),
-
-    // Extracted tags
     cves: v.optional(v.array(v.string())),
     malware: v.optional(v.array(v.string())),
     threatActors: v.optional(v.array(v.string())),
@@ -35,12 +27,12 @@ export default defineSchema({
     technologies: v.optional(v.array(v.string())),
     countries: v.optional(v.array(v.string())),
     industries: v.optional(v.array(v.string())),
-
-    // Deduplication
     unifiedEventId: v.optional(v.id("unifiedEvents")),
   })
     .index("by_source", ["sourceId"])
     .index("by_enriched", ["enriched"])
+    // COMPOUND INDEX: Allows filtering by category AND sorting by date simultaneously
+    .index("by_category_publishedAt", ["sourceCategory", "publishedAt"]) 
     .index("by_publishedAt", ["publishedAt"])
     .index("by_unified", ["unifiedEventId"])
     .searchIndex("search_all", {
@@ -48,16 +40,14 @@ export default defineSchema({
       filterFields: ["sourceCategory", "enriched"],
     }),
 
-  // RSS/web sources
   sources: defineTable({
     name: v.string(),
-    url: v.string(), // RSS feed URL
+    url: v.string(),
     category: v.union(v.literal("government"), v.literal("research"), v.literal("news")),
     enabled: v.boolean(),
     lastFetchedAt: v.optional(v.string()),
   }).index("by_category", ["category"]),
 
-  // Deduplicated unified events (admin-curated)
   unifiedEvents: defineTable({
     title: v.string(),
     summary: v.string(),

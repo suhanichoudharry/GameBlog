@@ -1,10 +1,15 @@
+"use node";
+
 import { usePaginatedQuery, useMutation, useAction } from "convex/react";
 import { api } from "@/convex/_generated/api.js";
 import { useState } from "react";
 import { Button } from "@/components/ui/button.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { toast } from "sonner";
-import { RefreshCw, Sparkles, ExternalLink, Clock, Building2, BookOpen, Newspaper, ChevronDown, CheckCircle2 } from "lucide-react";
+import { 
+  RefreshCw, Sparkles, ExternalLink, Clock, Building2, 
+  BookOpen, Newspaper, ChevronDown, CheckCircle2, X 
+} from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils.ts";
 import type { Doc } from "@/convex/_generated/dataModel.d.ts";
@@ -89,7 +94,6 @@ function IngestControls() {
         { icon: <Sparkles className="w-4 h-4 text-primary" /> }
       );
 
-      // Reset status after a moment
       setTimeout(() => setStatus("idle"), 3000);
     } catch {
       toast.error("Failed to fetch or enrich articles");
@@ -118,6 +122,9 @@ function IngestControls() {
 }
 
 function ArticleList({ category }: { category: Category }) {
+  // State to handle the modal
+  const [selectedArticle, setSelectedArticle] = useState<Doc<"articles"> | null>(null);
+
   const { results, status, loadMore } = usePaginatedQuery(
     api.articles.listArticles,
     {
@@ -150,8 +157,21 @@ function ArticleList({ category }: { category: Category }) {
   return (
     <div className="space-y-3">
       {results.map(article => (
-        <ArticleCard key={article._id} article={article} />
+        <ArticleCard 
+          key={article._id} 
+          article={article} 
+          onSelect={() => setSelectedArticle(article)} 
+        />
       ))}
+      
+      {/* Article Detail Modal */}
+      {selectedArticle && (
+        <ArticleModal 
+          article={selectedArticle} 
+          onClose={() => setSelectedArticle(null)} 
+        />
+      )}
+
       {status === "CanLoadMore" && (
         <div className="text-center pt-4">
           <Button variant="secondary" onClick={() => loadMore(20)}>
@@ -164,7 +184,7 @@ function ArticleList({ category }: { category: Category }) {
   );
 }
 
-function ArticleCard({ article }: { article: Doc<"articles"> }) {
+function ArticleCard({ article, onSelect }: { article: Doc<"articles">; onSelect: () => void }) {
   const cfg = CATEGORY_CONFIG[article.sourceCategory];
   const title = article.aiTitle ?? article.originalTitle;
   const summary = article.aiSummary;
@@ -177,16 +197,20 @@ function ArticleCard({ article }: { article: Doc<"articles"> }) {
     ...(article.cves ?? []).map(t => ({ label: t, color: "text-red-400 bg-red-400/10 border-red-400/20" })),
     ...(article.malware ?? []).map(t => ({ label: t, color: "text-orange-400 bg-orange-400/10 border-orange-400/20" })),
     ...(article.threatActors ?? []).map(t => ({ label: t, color: "text-yellow-400 bg-yellow-400/10 border-yellow-400/20" })),
+    ...(article.victims ?? []).map(t => ({ label: `Victim: ${t}`, color: "text-pink-400 bg-pink-400/10 border-pink-400/20" })),
     ...(article.technologies ?? []).map(t => ({ label: t, color: "text-cyan-400 bg-cyan-400/10 border-cyan-400/20" })),
     ...(article.countries ?? []).map(t => ({ label: t, color: "text-green-400 bg-green-400/10 border-green-400/20" })),
     ...(article.industries ?? []).map(t => ({ label: t, color: "text-purple-400 bg-purple-400/10 border-purple-400/20" })),
-  ].slice(0, 8);
+  ].slice(0, 10);
 
   return (
-    <div className={cn(
-      "rounded-xl border border-border bg-card p-4 transition-all hover:border-primary/30 hover:bg-card/80",
-      !article.enriched && "opacity-70"
-    )}>
+    <div 
+      onClick={onSelect}
+      className={cn(
+        "rounded-xl border border-border bg-card p-4 transition-all hover:border-primary/30 hover:bg-card/80 cursor-pointer group",
+        !article.enriched && "opacity-70"
+      )}
+    >
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0 space-y-2">
           <div className="flex items-center gap-2 flex-wrap">
@@ -203,7 +227,9 @@ function ArticleCard({ article }: { article: Doc<"articles"> }) {
             )}
           </div>
 
-          <h3 className="font-semibold text-sm leading-snug text-foreground">{title}</h3>
+          <h3 className="font-semibold text-sm leading-snug text-foreground group-hover:text-primary transition-colors">
+            {title}
+          </h3>
 
           {summary && (
             <p className="text-sm text-muted-foreground leading-relaxed line-clamp-2">{summary}</p>
@@ -212,7 +238,7 @@ function ArticleCard({ article }: { article: Doc<"articles"> }) {
           {allTags.length > 0 && (
             <div className="flex flex-wrap gap-1.5 pt-1">
               {allTags.map((tag, i) => (
-                <span key={i} className={cn("text-[11px] font-mono px-2 py-0.5 rounded border", tag.color)}>
+                <span key={i} className={cn("text-[10px] font-mono px-2 py-0.5 rounded border", tag.color)}>
                   {tag.label}
                 </span>
               ))}
@@ -224,6 +250,7 @@ function ArticleCard({ article }: { article: Doc<"articles"> }) {
           href={article.originalUrl}
           target="_blank"
           rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()} // Prevent modal from opening when clicking link
           className="text-muted-foreground hover:text-primary transition-colors shrink-0 cursor-pointer mt-0.5"
         >
           <ExternalLink className="w-4 h-4" />
@@ -236,6 +263,83 @@ function ArticleCard({ article }: { article: Doc<"articles"> }) {
           <span>Pending AI enrichment</span>
         </div>
       )}
+    </div>
+  );
+}
+
+function ArticleModal({ article, onClose }: { article: Doc<"articles">; onClose: () => void }) {
+  const sections = [
+    { title: "CVE IDs", data: article.cves, color: "text-red-400 bg-red-400/10 border-red-400/20" },
+    { title: "Malware", data: article.malware, color: "text-orange-400 bg-orange-400/10 border-orange-400/20" },
+    { title: "Threat Actors", data: article.threatActors, color: "text-yellow-400 bg-yellow-400/10 border-yellow-400/20" },
+    { title: "Targeted Victims", data: article.victims, color: "text-pink-400 bg-pink-400/10 border-pink-400/20" },
+    { title: "Technologies", data: article.technologies, color: "text-cyan-400 bg-cyan-400/10 border-cyan-400/20" },
+    { title: "Countries", data: article.countries, color: "text-green-400 bg-green-400/10 border-green-400/20" },
+    { title: "Industries", data: article.industries, color: "text-purple-400 bg-purple-400/10 border-purple-400/20" },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
+      <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-card border border-border rounded-2xl shadow-2xl p-6 md:p-8">
+        <button 
+          onClick={onClose}
+          className="absolute top-4 right-4 p-2 rounded-full hover:bg-accent transition-colors"
+        >
+          <X className="w-5 h-5 text-muted-foreground" />
+        </button>
+
+        <div className="space-y-6">
+          <header className="space-y-2 pr-8">
+            <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              <Sparkles className="w-3 h-3 text-primary" />
+              AI-Enriched Intelligence
+            </div>
+            <h2 className="text-2xl font-bold leading-tight">
+              {article.aiTitle || article.originalTitle}
+            </h2>
+          </header>
+
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground border-b border-border pb-2">
+              Summary
+            </h3>
+            <p className="text-base text-foreground leading-relaxed">
+              {article.aiSummary || "No AI summary available for this entry."}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {sections.map(section => (
+              section.data && section.data.length > 0 && (
+                <div key={section.title} className="space-y-3">
+                  <h4 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                    {section.title}
+                  </h4>
+                  <div className="flex flex-wrap gap-2">
+                    {section.data.map((item, idx) => (
+                      <span key={idx} className={cn("text-[11px] font-mono px-2.5 py-1 rounded border", section.color)}>
+                        {item}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )
+            ))}
+          </div>
+
+          <div className="pt-6 border-t border-border flex justify-between items-center">
+            <span className="text-xs text-muted-foreground">
+              Source: <span className="text-foreground font-medium">{article.sourceName}</span>
+            </span>
+            <Button size="sm" asChild variant="outline">
+              <a href={article.originalUrl} target="_blank" rel="noopener noreferrer">
+                View Original Source
+                <ExternalLink className="w-3 h-3 ml-2" />
+              </a>
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
